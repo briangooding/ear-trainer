@@ -69,6 +69,11 @@
   .btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
   .btn.on { background: var(--bad); color: #fff; }
   .btn:disabled { opacity: .5; cursor: default; }
+  .btns { display: grid; gap: 8px; }
+  .btn.ghost[aria-pressed=true] { background: var(--accent2); border-color: var(--accent2); color: #fff; }
+  .fzbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+  .fzbar[hidden] { display: none; }
+  .fzbar .lab { flex-basis: 100%; }
   .btn.small { padding: 7px 11px; font-size: .9rem; border-radius: 10px; }
   .meter { position: relative; height: 8px; margin: 10px 0 2px; border-radius: 4px; background: var(--grid); }
   .meter::before { content: ""; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--muted); opacity: .6; }
@@ -143,12 +148,18 @@
         <div class="note" id="fnote">&nbsp;</div>
         <div class="band" id="fband">&nbsp;</div>
       </div>
-      <button class="btn" id="mic" type="button">Start microphone</button>
+      <div class="btns"><button class="btn" id="mic" type="button">Start microphone</button>
+        <button class="btn ghost" id="freeze" type="button" aria-pressed="false">Freeze</button></div>
     </div>
     <div class="meter" aria-hidden="true"><div class="needle" id="needle"></div></div>
     <div class="meter-l" aria-hidden="true"><span>−50¢ flat</span><span>in tune</span><span>sharp +50¢</span></div>
     <canvas id="spec" aria-label="Spectrum: frequency on a log scale against level"></canvas>
     <canvas id="sg" aria-label="Spectrogram: the last few seconds, newest at the top"></canvas>
+    <div class="fzbar" id="fzbar" hidden>
+      <button class="btn small" id="fz-play" type="button">Play tone</button>
+      <button class="btn ghost small" id="fz-snap" type="button">Back to captured peak</button>
+      <span class="lab">Frozen. Drag the orange dot (or touch anywhere on the spectrum) to hear that frequency and compare it with what you captured. The ring marks the captured peak.</span>
+    </div>
     <p class="cap">Top: spectrum (frequency left to right, louder is higher). Bottom: spectrogram, the last few seconds, newest on top. Orange labels mark the A notes (A4 = 440 Hz).</p>
     <p class="msg" id="msg" role="status">Tap “Start microphone” and make a sound: whistle, hum, play an instrument.</p>
   </section>
@@ -270,6 +281,7 @@ let saved = store.get();
 const persist = (k, v) => { saved[k] = v; store.set(saved); };
 
 /* ---------- audio graph ---------- */
+const liveBins = () => bins;
 let ctx, analyser, master, toneToAn, bins, binHz, micStream, micSrc, tone = null, micOn = false;
 let volume = saved.vol ?? 35;
 const volGain = (v) => Math.pow(v / 100, 2) * 0.5; // gentle curve, capped at half scale
@@ -416,7 +428,7 @@ const xOf = (f) => (Math.log(f / fmin) / Math.log(ratio())) * W;
 const fOf = (x) => fmin * Math.pow(ratio(), x / W);
 const yOf = (db) => 8 + (H - 8 - 20) * (1 - (clamp(db, DBMIN, DBMAX) - DBMIN) / (DBMAX - DBMIN));
 
-function computeColumns() {
+function computeColumns(bins) {
   const n = bins.length;
   for (let x = 0; x < W; x++) {
     const i0 = fOf(x) / binHz, i1 = fOf(x + 1) / binHz;
@@ -432,7 +444,8 @@ function computeColumns() {
   }
 }
 
-function findPeak() {
+function findPeak(src) {
+  const bins = src || liveBins();
   const i0 = Math.max(2, Math.ceil(fmin / binHz)), i1 = Math.min(bins.length - 3, Math.floor(fmax / binHz));
   let bi = -1, bv = -Infinity;
   for (let i = i0; i <= i1; i++) if (bins[i] > bv) { bv = bins[i]; bi = i; }
@@ -446,6 +459,7 @@ function findPeak() {
 let activeTab = 'listen';
 const quiz = { mode: 'test', level: saved.level || 'oct', target: null, answered: true, prev: null };
 const isBlind = () => activeTab === 'quiz' && quiz.mode === 'test' && quiz.target && !quiz.answered;
+let frozen = false, frozenBins = null, frozenPeak = null, dotF = 0, dragging = false, latched = false;
 let cursorF = null, shown = 0, lastPeakT = -1e9, lastPeakDb = DBMIN;
 
 function drawSpectrum(peak, blind) {
@@ -492,7 +506,7 @@ function drawSpectrum(peak, blind) {
   }
 
   // spectrum
-  if (bins && (micOn || tone)) {
+  if (bins && (micOn || tone || frozen)) {
     c.beginPath(); c.moveTo(0, bottom);
     for (let x = 0; x < W; x++) c.lineTo(x, yOf(cols[x]));
     c.lineTo(W, bottom); c.closePath();
@@ -507,8 +521,18 @@ function drawSpectrum(peak, blind) {
     c.strokeStyle = theme.accent2; c.lineWidth = 1.5; c.setLineDash([4, 4]);
     c.beginPath(); c.moveTo(x, 8); c.lineTo(x, bottom); c.stroke(); c.setLineDash([]);
   }
-  // peak marker
-  if (peak) {
+  // peak marker (frozen: draggable dot + ring where the captured peak was)
+  if (peak && frozen) {
+    const x = xOf(peak.f), y = yOf(peak.db);
+    if (frozenPeak && frozenPeak.f >= fmin && frozenPeak.f <= fmax) {
+      c.strokeStyle = theme.accent2; c.lineWidth = 2; c.beginPath(); c.arc(xOf(frozenPeak.f), yOf(frozenPeak.db), 7, 0, 7); c.stroke();
+    }
+    c.strokeStyle = theme.accent2; c.lineWidth = 1; c.beginPath(); c.moveTo(x, y + 10); c.lineTo(x, bottom); c.stroke();
+    c.fillStyle = theme.accent2; c.beginPath(); c.arc(x, y, 10, 0, 7); c.fill();
+    c.strokeStyle = theme.plot; c.lineWidth = 3; c.stroke();
+    c.fillStyle = theme.accent2; c.textAlign = 'right'; c.textBaseline = 'top'; c.font = '700 11px system-ui, sans-serif';
+    c.fillText('FROZEN', W - 6, 24);
+  } else if (peak) {
     const x = xOf(peak.f), y = yOf(peak.db);
     c.fillStyle = theme.accent2;
     c.beginPath(); c.arc(x, y, 4.5, 0, 7); c.fill();
@@ -544,7 +568,8 @@ function updateReadout(now, peak, blind) {
   lastText = now;
   const r = $('#readout');
   if (peak && !blind) {
-    if (shown && Math.abs(Math.log(peak.f / shown)) < 0.012) shown += (peak.f - shown) * 0.35; else shown = peak.f;
+    if (frozen) shown = peak.f;
+    else if (shown && Math.abs(Math.log(peak.f / shown)) < 0.012) shown += (peak.f - shown) * 0.35; else shown = peak.f;
     lastPeakT = now; lastPeakDb = peak.db;
   }
   const age = now - lastPeakT;
@@ -566,14 +591,18 @@ function frame(now) {
   if (document.hidden || !W || !row) return;
   const live = !!analyser && (micOn || !!tone);
   const blind = !!isBlind();
+  if (blind && frozen) setFrozen(false);
   let peak = null;
-  if (live) {
+  if (frozen) {
+    computeColumns(frozenBins);
+    peak = { f: dotF, db: cols[clamp(Math.round(xOf(dotF)), 0, W - 1)] };
+  } else if (live) {
     analyser.getFloatFrequencyData(bins);
-    computeColumns();
-    if (!blind) peak = findPeak();
+    computeColumns(bins);
+    if (!blind) peak = findPeak(bins);
   }
   drawSpectrum(peak, blind);
-  if (live && !blind) { pushSpectrogramRow(); sgHas = true; }
+  if (live && !blind && !frozen) { pushSpectrogramRow(); sgHas = true; }
   else if (blind && sgHas) { gctx.fillStyle = '#0a0d18'; gctx.fillRect(0, 0, sg.width, sg.height); sgHas = false; }
   updateReadout(now, peak, blind);
 }
@@ -581,22 +610,61 @@ requestAnimationFrame(frame);
 
 /* pointer: read any frequency; in the Tone tab it also sets the tone */
 function pointerF(e) { const r = spec.getBoundingClientRect(); return fOf(clamp(e.clientX - r.left, 0, W)); }
+const waveType = () => $('#wave').value;
+function moveDot(f) {
+  dotF = clamp(f, 20, 16000);
+  if (tone) toneSetFreq(dotF); else toneStart(dotF, waveType());
+}
+function endDrag() { if (!dragging) return; dragging = false; if (!latched) toneStop(); }
 spec.addEventListener('pointerdown', (e) => {
   cursorF = pointerF(e);
+  if (frozen) { dragging = true; spec.setPointerCapture(e.pointerId); moveDot(cursorF); return; }
   if (activeTab === 'tone') setToneFreq(cursorF);
 });
 spec.addEventListener('pointermove', (e) => {
   cursorF = pointerF(e);
+  if (frozen) { if (dragging) moveDot(cursorF); return; }
   if (activeTab === 'tone' && e.buttons) setToneFreq(cursorF);
 });
 spec.addEventListener('pointerleave', () => { cursorF = null; });
-spec.addEventListener('pointerup', (e) => { if (e.pointerType !== 'mouse') cursorF = null; });
-spec.addEventListener('pointercancel', () => { cursorF = null; });
+spec.addEventListener('pointerup', (e) => { endDrag(); if (e.pointerType !== 'mouse') cursorF = null; });
+spec.addEventListener('pointercancel', () => { endDrag(); cursorF = null; });
+
+/* freeze: hold the current spectrum, then drag the dot to recreate the tone by ear */
+function setFzButton() {
+  $('#fz-play').textContent = latched ? 'Stop tone' : 'Play tone';
+  $('#fz-play').classList.toggle('on', latched);
+}
+function setFrozen(on) {
+  if (on === frozen) return;
+  if (on) {
+    if (!bins || !(micOn || tone) || isBlind()) { msg('Start the microphone (or a tone) and make a sound, then freeze.'); return; }
+    frozenBins = Float32Array.from(bins);
+    frozenPeak = findPeak(frozenBins);
+    dotF = frozenPeak ? frozenPeak.f : Math.sqrt(fmin * fmax);
+    frozen = true;
+    msg('Frozen. Drag the orange dot to hear any frequency; the ring marks the peak you captured.');
+  } else {
+    frozen = false; dragging = false; latched = false; toneStop();
+    frozenBins = frozenPeak = null; shown = 0;
+    msg(micOn ? 'Listening… make a sound.' : 'Unfrozen.');
+  }
+  $('#freeze').setAttribute('aria-pressed', frozen);
+  $('#freeze').textContent = frozen ? 'Unfreeze' : 'Freeze';
+  $('#fzbar').hidden = !frozen;
+  setFzButton();
+}
+$('#freeze').addEventListener('click', () => setFrozen(!frozen));
+$('#fz-play').addEventListener('click', () => {
+  if (latched) { latched = false; toneStop(); } else { latched = true; toneStart(dotF, waveType()); }
+  setFzButton();
+});
+$('#fz-snap').addEventListener('click', () => { if (frozenPeak) { dotF = clamp(frozenPeak.f, 20, 16000); if (tone) toneSetFreq(dotF); } });
 
 /* ---------- tabs ---------- */
 const tabs = [...document.querySelectorAll('[role=tab]')];
 function showTab(name, focus) {
-  if (name !== activeTab) { clearTimeout(playTimer); toneStop(); setToneButton(); }
+  if (name !== activeTab) { clearTimeout(playTimer); toneStop(); latched = false; setFzButton(); setToneButton(); }
   activeTab = name;
   tabs.forEach((t) => {
     const on = t.dataset.tab === name;
