@@ -1,0 +1,741 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#10201f">
+<title>Ear Trainer</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Ear Trainer">
+<style>
+  /* Layout: one phone-width column. Live analyzer card on top (readout, spectrum, spectrogram),
+     then three tabs underneath: Listen (mic settings), Tone (play any frequency), Quiz (train your ear). */
+  :root {
+    --bg: #f3f7f6; --card: #ffffff; --text: #14201f; --muted: #5a6b69; --line: #d9e4e2;
+    --accent: #0b7a75; --accent-ink: #ffffff; --accent2: #c2570c;
+    --ok: #17803d; --bad: #b42318;
+    --plot: #f8fbfa; --grid: #d3dedc;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0c1514; --card: #142120; --text: #e6f2f0; --muted: #9bb3b0; --line: #243836;
+      --accent: #3fd0c9; --accent-ink: #062321; --accent2: #ffb061;
+      --ok: #4ade80; --bad: #ff8a80;
+      --plot: #0d1a19; --grid: #223533;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0c1514; --card: #142120; --text: #e6f2f0; --muted: #9bb3b0; --line: #243836;
+    --accent: #3fd0c9; --accent-ink: #062321; --accent2: #ffb061;
+    --ok: #4ade80; --bad: #ff8a80;
+    --plot: #0d1a19; --grid: #223533;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  main {
+    max-width: 640px; margin: 0 auto; display: grid; gap: 14px;
+    padding-inline: max(16px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-right, 0px));
+    padding-block: calc(18px + env(safe-area-inset-top, 0px)) calc(40px + env(safe-area-inset-bottom, 0px));
+  }
+  h1 { font-size: 1.4rem; margin: 0; text-wrap: balance; }
+  .sub { margin: 2px 0 0; color: var(--muted); font-size: .92rem; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px; }
+  button, select, input { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* Readout */
+  .top { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; }
+  .freq { font-size: 2.6rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+  .freq small { font-size: 1rem; font-weight: 600; color: var(--muted); letter-spacing: 0; margin-left: 4px; }
+  .note { margin-top: 6px; font-size: 1.05rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .band { color: var(--muted); font-size: .9rem; min-height: 1.3em; }
+  .readout.stale .freq, .readout.stale .note { opacity: .4; }
+  .btn {
+    border: 0; border-radius: 12px; padding: 11px 16px; font-weight: 650;
+    background: var(--accent); color: var(--accent-ink); white-space: nowrap;
+  }
+  .btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
+  .btn.on { background: var(--bad); color: #fff; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn.small { padding: 7px 11px; font-size: .9rem; border-radius: 10px; }
+  .meter { position: relative; height: 8px; margin: 10px 0 2px; border-radius: 4px; background: var(--grid); }
+  .meter::before { content: ""; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--muted); opacity: .6; }
+  .needle { position: absolute; top: -3px; bottom: -3px; width: 6px; margin-left: -3px; border-radius: 3px; background: var(--accent); left: 50%; transition: left .08s linear; }
+  .meter-l { display: flex; justify-content: space-between; color: var(--muted); font-size: .72rem; }
+  canvas { display: block; width: 100%; border-radius: 10px; background: var(--plot); touch-action: pan-y; }
+  #spec { height: 230px; margin-top: 12px; }
+  #sg { height: 110px; margin-top: 8px; image-rendering: auto; background: #0a0d18; }
+  .cap { margin: 6px 2px 0; color: var(--muted); font-size: .78rem; }
+  .msg { margin: 8px 0 0; color: var(--muted); font-size: .9rem; min-height: 1.3em; }
+  .msg.err { color: var(--bad); }
+
+  /* Tabs */
+  [role=tablist] { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
+  [role=tab] { border: 0; background: transparent; padding: 9px 4px; border-radius: 10px; font-weight: 650; color: var(--muted); }
+  [role=tab][aria-selected=true] { background: var(--accent); color: var(--accent-ink); }
+  [role=tabpanel][hidden] { display: none; }
+  h2 { font-size: 1rem; margin: 0 0 8px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .field { display: grid; gap: 4px; margin-bottom: 12px; }
+  .field label, .lab { font-size: .85rem; color: var(--muted); font-weight: 600; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  select, input[type=number] {
+    background: var(--plot); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; min-width: 0;
+  }
+  input[type=number] { width: 7.5em; font-variant-numeric: tabular-nums; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    border: 1px solid var(--line); background: var(--plot); border-radius: 999px; padding: 6px 11px; font-size: .88rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .chip b { font-weight: 700; }
+  .chip:active, .chip.sel { border-color: var(--accent); }
+  .big-tone { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .hint { color: var(--muted); font-size: .85rem; margin: 6px 0 0; }
+  .bands { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: .9rem; }
+  .bands li { display: grid; grid-template-columns: 92px 1fr; gap: 8px; }
+  .bands b { font-variant-numeric: tabular-nums; }
+  .bands span { color: var(--muted); }
+
+  /* Quiz */
+  .seg { display: inline-grid; grid-auto-flow: column; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 12px; background: var(--plot); }
+  .seg button { border: 0; background: transparent; padding: 6px 12px; border-radius: 9px; font-weight: 600; color: var(--muted); }
+  .seg button[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); }
+  .choices { display: grid; gap: 8px; margin: 12px 0; grid-template-columns: repeat(4, 1fr); }
+  .choices.third { grid-template-columns: repeat(5, 1fr); }
+  .choice {
+    border: 1px solid var(--line); background: var(--plot); border-radius: 12px; padding: 12px 0;
+    font-weight: 650; font-variant-numeric: tabular-nums;
+  }
+  .choice.correct { background: var(--ok); border-color: var(--ok); color: #fff; }
+  .choice.wrong { background: var(--bad); border-color: var(--bad); color: #fff; }
+  .choice.flash { border-color: var(--accent); }
+  .fb { min-height: 2.6em; margin: 0 0 6px; font-weight: 600; }
+  .stats { color: var(--muted); font-size: .9rem; margin: 8px 0 0; }
+  footer { color: var(--muted); font-size: .8rem; text-align: center; }
+  footer a { color: inherit; }
+  @media (prefers-reduced-motion: reduce) { .needle { transition: none; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Ear Trainer</h1>
+    <p class="sub">See and hear frequencies, then test whether you can name them.</p>
+  </header>
+
+  <section class="card" aria-label="Spectrum analyzer">
+    <div class="top">
+      <div class="readout" id="readout">
+        <div class="freq"><span id="fv">—</span><small id="fu">Hz</small></div>
+        <div class="note" id="fnote">&nbsp;</div>
+        <div class="band" id="fband">&nbsp;</div>
+      </div>
+      <button class="btn" id="mic" type="button">Start microphone</button>
+    </div>
+    <div class="meter" aria-hidden="true"><div class="needle" id="needle"></div></div>
+    <div class="meter-l" aria-hidden="true"><span>−50¢ flat</span><span>in tune</span><span>sharp +50¢</span></div>
+    <canvas id="spec" aria-label="Spectrum: frequency on a log scale against level"></canvas>
+    <canvas id="sg" aria-label="Spectrogram: the last few seconds, newest at the top"></canvas>
+    <p class="cap">Top: spectrum (frequency left to right, louder is higher). Bottom: spectrogram, the last few seconds, newest on top. Orange labels mark the A notes (A4 = 440 Hz).</p>
+    <p class="msg" id="msg" role="status">Tap “Start microphone” and make a sound: whistle, hum, play an instrument.</p>
+  </section>
+
+  <div role="tablist" aria-label="Mode">
+    <button role="tab" id="t-listen" aria-controls="p-listen" aria-selected="true" data-tab="listen">Listen</button>
+    <button role="tab" id="t-tone" aria-controls="p-tone" aria-selected="false" data-tab="tone" tabindex="-1">Tone</button>
+    <button role="tab" id="t-quiz" aria-controls="p-quiz" aria-selected="false" data-tab="quiz" tabindex="-1">Quiz</button>
+  </div>
+
+  <!-- LISTEN -->
+  <section class="card" role="tabpanel" id="p-listen" aria-labelledby="t-listen">
+    <div class="field">
+      <label for="sens">Sensitivity (how quiet a sound still counts)</label>
+      <input type="range" id="sens" min="0" max="100" value="50">
+    </div>
+    <div class="field">
+      <label for="range">Frequency range</label>
+      <select id="range">
+        <option value="20,20000">Everything: 20 Hz – 20 kHz</option>
+        <option value="50,5000">Voice &amp; instruments: 50 Hz – 5 kHz</option>
+        <option value="20,1000">Bass &amp; low end: 20 Hz – 1 kHz</option>
+        <option value="1000,20000">Highs: 1 kHz – 20 kHz</option>
+      </select>
+    </div>
+    <h2>What the ranges sound like</h2>
+    <ul class="bands" id="bands"></ul>
+    <p class="hint">The big number is the loudest frequency. Voices and instruments also make overtones at 2×, 3×… the pitch, so you’ll see a comb of peaks; the tallest one isn’t always the note you hear. A whistle or a sine tone gives one clean peak. Tap or drag on the spectrum to read any frequency.</p>
+  </section>
+
+  <!-- TONE -->
+  <section class="card" role="tabpanel" id="p-tone" aria-labelledby="t-tone" hidden>
+    <div class="row" style="justify-content:space-between;margin-bottom:8px">
+      <div class="big-tone" id="tone-label">440 Hz</div>
+      <button class="btn" id="tone-play" type="button">Play</button>
+    </div>
+    <div class="field">
+      <label for="tone-slider">Frequency (or tap the spectrum above)</label>
+      <input type="range" id="tone-slider" min="0" max="1000" value="0" step="1">
+    </div>
+    <div class="row" style="margin-bottom:12px">
+      <input type="number" id="tone-num" min="20" max="16000" step="1" inputmode="decimal" aria-label="Frequency in hertz"> <span class="lab">Hz</span>
+      <button class="btn ghost small" data-step="-12" type="button">−octave</button>
+      <button class="btn ghost small" data-step="-1" type="button">−semitone</button>
+      <button class="btn ghost small" data-step="1" type="button">+semitone</button>
+      <button class="btn ghost small" data-step="12" type="button">+octave</button>
+    </div>
+    <div class="row" style="margin-bottom:12px">
+      <div class="field" style="margin:0"><label for="wave">Waveform</label>
+        <select id="wave"><option value="sine">Sine (pure)</option><option value="triangle">Triangle</option><option value="square">Square (buzzy)</option><option value="sawtooth">Sawtooth (bright)</option></select></div>
+      <div class="field" style="margin:0;flex:1;min-width:140px"><label for="vol-tone">Speaker volume</label>
+        <input type="range" class="vol" id="vol-tone" min="0" max="100" value="35"></div>
+    </div>
+    <div class="lab" style="margin-bottom:6px">Landmarks (tap to jump &amp; play)</div>
+    <div class="chips" id="landmarks"></div>
+    <p class="hint" id="lowhint" hidden>Most phone speakers can’t reproduce much below ~150 Hz; use headphones to hear low tones. Keep the volume low, especially with headphones.</p>
+    <p class="hint">Try the same note as sine vs. square: the spectrum shows the extra overtones that change the tone color.</p>
+  </section>
+
+  <!-- QUIZ -->
+  <section class="card" role="tabpanel" id="p-quiz" aria-labelledby="t-quiz" hidden>
+    <div class="row" style="justify-content:space-between">
+      <div class="seg" role="group" aria-label="Mode">
+        <button type="button" id="m-learn" aria-pressed="false">Learn</button>
+        <button type="button" id="m-test" aria-pressed="true">Test</button>
+      </div>
+      <div class="seg" role="group" aria-label="Difficulty">
+        <button type="button" id="l-oct" aria-pressed="true">Octaves</button>
+        <button type="button" id="l-third" aria-pressed="false">⅓ octaves</button>
+      </div>
+    </div>
+    <p class="hint" id="quiz-help"></p>
+    <div class="choices" id="choices" role="group" aria-label="Frequency choices (Hz)"></div>
+    <p class="fb" id="fb" aria-live="polite"></p>
+    <div class="row">
+      <button class="btn" id="q-play" type="button">Play a tone</button>
+      <div class="field" style="margin:0;flex:1;min-width:140px"><label for="vol-quiz">Speaker volume</label>
+        <input type="range" class="vol" id="vol-quiz" min="0" max="100" value="35"></div>
+    </div>
+    <p class="stats" id="stats"></p>
+    <p class="hint">Start in <b>Learn</b>: tap each button, listen, and watch where it lands on the spectrum. Then switch to <b>Test</b>. Pure tones are used; the analyzer is hidden until you answer so it can’t give the answer away. Octave landmarks: 125 is a low hum, 1k is a telephone-ish “honk”, 4k is where ears are most sensitive.</p>
+  </section>
+
+  <footer>Everything runs on your phone; no audio leaves the device.</footer>
+</main>
+
+<script>
+(() => {
+'use strict';
+
+/* ---------- helpers ---------- */
+const $ = (s) => document.querySelector(s);
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const NOTES = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
+function noteOf(f) {
+  const m = 12 * Math.log2(f / 440) + 69, n = Math.round(m);
+  return { name: NOTES[((n % 12) + 12) % 12] + (Math.floor(n / 12) - 1), cents: Math.round((m - n) * 100) };
+}
+function fmt(f) {
+  if (f >= 1000) return { v: (f / 1000).toFixed(f >= 10000 ? 1 : 2), u: 'kHz' };
+  return { v: f.toFixed(f < 100 ? 1 : 0), u: 'Hz' };
+}
+const short = (f) => (f >= 1000 ? +(f / 1000).toFixed(2) + 'k' : String(f));
+const BANDS = [
+  [20, 60, 'Sub-bass', 'Felt more than heard: rumble, kick-drum thump'],
+  [60, 250, 'Bass', 'Warmth and weight: bass guitar, low male voice'],
+  [250, 500, 'Low mids', 'Body; “boxy” or “muddy” if too much'],
+  [500, 2000, 'Mids', 'Core of voices and instruments; “honky” if too much'],
+  [2000, 4000, 'Presence', 'Clarity and intelligibility; ears are most sensitive here'],
+  [4000, 6000, 'Brilliance', 'Bite and edge: consonants, cymbal attack'],
+  [6000, 20001, 'Air', 'Sibilance (“s”), sparkle, shimmer'],
+];
+const bandOf = (f) => (BANDS.find((b) => f >= b[0] && f < b[1]) || [0, 0, ''])[2];
+const store = {
+  get() { try { return JSON.parse(localStorage.getItem('eartrainer.v1')) || {}; } catch { return {}; } },
+  set(o) { try { localStorage.setItem('eartrainer.v1', JSON.stringify(o)); } catch {} },
+};
+let saved = store.get();
+const persist = (k, v) => { saved[k] = v; store.set(saved); };
+
+/* ---------- audio graph ---------- */
+let ctx, analyser, master, toneToAn, bins, binHz, micStream, micSrc, tone = null, micOn = false;
+let volume = saved.vol ?? 35;
+const volGain = (v) => Math.pow(v / 100, 2) * 0.5; // gentle curve, capped at half scale
+
+function ensureAudio() {
+  if (!ctx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    ctx = new AC();
+    analyser = ctx.createAnalyser();
+    analyser.fftSize = 16384;
+    analyser.smoothingTimeConstant = 0.55;
+    bins = new Float32Array(analyser.frequencyBinCount);
+    binHz = ctx.sampleRate / analyser.fftSize;
+    const sink = ctx.createGain(); sink.gain.value = 0; // keeps the analyser "pulled" in every browser
+    analyser.connect(sink); sink.connect(ctx.destination);
+    master = ctx.createGain(); master.gain.value = volGain(volume); master.connect(ctx.destination);
+    toneToAn = ctx.createGain(); toneToAn.gain.value = 0.1; toneToAn.connect(analyser);
+  }
+  if (ctx.state !== 'running') ctx.resume().catch(() => {});
+}
+
+function toneStart(f, type = 'sine') {
+  ensureAudio();
+  toneStop();
+  const osc = ctx.createOscillator(), env = ctx.createGain();
+  osc.type = type; osc.frequency.value = f; env.gain.value = 0;
+  osc.connect(env); env.connect(master); env.connect(toneToAn);
+  env.gain.setTargetAtTime(1, ctx.currentTime, 0.01);
+  osc.start();
+  tone = { osc, env, f };
+}
+function toneStop() {
+  if (!tone) return;
+  const { osc, env } = tone; tone = null;
+  const t = ctx.currentTime;
+  env.gain.cancelScheduledValues(t);
+  env.gain.setTargetAtTime(0, t, 0.015);
+  osc.stop(t + 0.2);
+  osc.onended = () => env.disconnect();
+}
+function toneSetFreq(f) { if (tone) { tone.f = f; tone.osc.frequency.setTargetAtTime(f, ctx.currentTime, 0.02); } }
+let playTimer = 0;
+function playFor(f, ms) { clearTimeout(playTimer); toneStart(f, 'sine'); playTimer = setTimeout(toneStop, ms); }
+
+function setVolume(v) {
+  volume = +v; persist('vol', volume);
+  document.querySelectorAll('.vol').forEach((el) => { el.value = volume; });
+  if (master) master.gain.setTargetAtTime(volGain(volume), ctx.currentTime, 0.02);
+}
+
+const msg = (t, err = false) => { const m = $('#msg'); m.textContent = t; m.classList.toggle('err', err); };
+
+async function micStart() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    msg('This browser can’t reach the microphone here. Open the page over https (the live link) in Safari or Chrome.', true);
+    return;
+  }
+  ensureAudio();
+  try {
+    // Turn off the phone's voice processing: it would hide tones and flatten the spectrum.
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+  } catch (e) {
+    msg(e && e.name === 'NotAllowedError'
+      ? 'Microphone permission was denied. Allow it for this site in your browser settings, then try again.'
+      : 'Couldn’t start the microphone: ' + (e && e.message ? e.message : e), true);
+    return;
+  }
+  micSrc = ctx.createMediaStreamSource(micStream);
+  micSrc.connect(analyser);
+  micOn = true;
+  $('#mic').textContent = 'Stop microphone'; $('#mic').classList.add('on');
+  msg('Listening… make a sound.');
+}
+function micStop() {
+  if (micStream) micStream.getTracks().forEach((t) => t.stop());
+  if (micSrc) micSrc.disconnect();
+  micStream = micSrc = null; micOn = false;
+  $('#mic').textContent = 'Start microphone'; $('#mic').classList.remove('on');
+  msg('Microphone off.');
+}
+$('#mic').addEventListener('click', () => (micOn ? micStop() : micStart()));
+
+/* ---------- settings ---------- */
+const DBMIN = -100, DBMAX = -10;
+let fmin = 20, fmax = 20000;
+let thr = -70;
+function applyRange(v) {
+  const [a, b] = v.split(',').map(Number);
+  fmin = a; fmax = b; persist('range', v);
+}
+function applySens(s) { thr = -100 + (100 - s) * 0.6; persist('sens', +s); }
+$('#range').value = saved.range || '20,20000';
+if ($('#range').value !== (saved.range || '20,20000')) $('#range').value = '20,20000';
+applyRange($('#range').value);
+$('#sens').value = saved.sens ?? 50; applySens($('#sens').value);
+$('#range').addEventListener('change', (e) => applyRange(e.target.value));
+$('#sens').addEventListener('input', (e) => applySens(e.target.value));
+document.querySelectorAll('.vol').forEach((el) => { el.value = volume; el.addEventListener('input', (e) => setVolume(e.target.value)); });
+
+$('#bands').innerHTML = BANDS.map((b) => {
+  const hi = b[1] > 20000 ? '20k' : short(b[1]);
+  return `<li><b>${short(b[0])}–${hi} Hz</b><span><strong style="color:var(--text)">${b[2]}.</strong> ${b[3]}</span></li>`;
+}).join('');
+
+/* ---------- canvases ---------- */
+const spec = $('#spec'), sg = $('#sg');
+const sctx = spec.getContext('2d'), gctx = sg.getContext('2d');
+let W = 0, H = 0, DPR = 1, cols = new Float32Array(0), row = null, theme = {}, sgHas = false;
+
+function readTheme() {
+  const s = getComputedStyle(document.documentElement), g = (n) => s.getPropertyValue(n).trim();
+  theme = { plot: g('--plot'), grid: g('--grid'), text: g('--muted'), accent: g('--accent'), accent2: g('--accent2') };
+}
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 3);
+  W = Math.round(spec.clientWidth); H = Math.round(spec.clientHeight);
+  if (!W) return;
+  spec.width = W * DPR; spec.height = H * DPR;
+  sctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  sg.width = W; sg.height = Math.round(sg.clientHeight);
+  cols = new Float32Array(W);
+  row = gctx.createImageData(W, 1);
+  gctx.fillStyle = '#0a0d18'; gctx.fillRect(0, 0, sg.width, sg.height);
+  readTheme();
+}
+new ResizeObserver(resize).observe(spec);
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => setTimeout(readTheme, 50));
+
+// Spectrogram palette: dark navy -> purple -> orange -> pale yellow.
+const LUT = (() => {
+  const stops = [[0, 10, 13, 24], [.25, 40, 30, 110], [.5, 160, 40, 120], [.75, 240, 130, 40], [1, 255, 245, 190]];
+  const out = new Uint8ClampedArray(256 * 3);
+  for (let i = 0; i < 256; i++) {
+    const t = i / 255; let k = 0;
+    while (k < stops.length - 2 && t > stops[k + 1][0]) k++;
+    const a = stops[k], b = stops[k + 1], u = (t - a[0]) / (b[0] - a[0]);
+    for (let c = 0; c < 3; c++) out[i * 3 + c] = a[c + 1] + (b[c + 1] - a[c + 1]) * u;
+  }
+  return out;
+})();
+
+const ratio = () => fmax / fmin;
+const xOf = (f) => (Math.log(f / fmin) / Math.log(ratio())) * W;
+const fOf = (x) => fmin * Math.pow(ratio(), x / W);
+const yOf = (db) => 8 + (H - 8 - 20) * (1 - (clamp(db, DBMIN, DBMAX) - DBMIN) / (DBMAX - DBMIN));
+
+function computeColumns() {
+  const n = bins.length;
+  for (let x = 0; x < W; x++) {
+    const i0 = fOf(x) / binHz, i1 = fOf(x + 1) / binHz;
+    let v;
+    if (i1 - i0 < 1) { // zoomed in: more pixels than bins, interpolate
+      const p = (i0 + i1) / 2, k = Math.floor(p), fr = p - k;
+      v = bins[clamp(k, 0, n - 1)] * (1 - fr) + bins[clamp(k + 1, 0, n - 1)] * fr;
+    } else { // zoomed out: keep the tallest bin so narrow peaks never disappear
+      v = -Infinity;
+      for (let i = Math.floor(i0), e = Math.min(Math.ceil(i1), n - 1); i <= e; i++) if (bins[i] > v) v = bins[i];
+    }
+    cols[x] = v > DBMIN ? Math.min(v, DBMAX) : DBMIN;
+  }
+}
+
+function findPeak() {
+  const i0 = Math.max(2, Math.ceil(fmin / binHz)), i1 = Math.min(bins.length - 3, Math.floor(fmax / binHz));
+  let bi = -1, bv = -Infinity;
+  for (let i = i0; i <= i1; i++) if (bins[i] > bv) { bv = bins[i]; bi = i; }
+  if (bi < 0 || !(bv > thr)) return null;
+  const a = bins[bi - 1], b = bins[bi], c = bins[bi + 1], d = a - 2 * b + c;
+  const p = d < 0 ? clamp(0.5 * (a - c) / d, -0.5, 0.5) : 0; // parabolic interpolation: finer than one bin
+  return { f: (bi + p) * binHz, db: bv };
+}
+
+/* ---------- state shared with tabs ---------- */
+let activeTab = 'listen';
+const quiz = { mode: 'test', level: saved.level || 'oct', target: null, answered: true, prev: null };
+const isBlind = () => activeTab === 'quiz' && quiz.mode === 'test' && quiz.target && !quiz.answered;
+let cursorF = null, shown = 0, lastPeakT = -1e9, lastPeakDb = DBMIN;
+
+function drawSpectrum(peak, blind) {
+  const c = sctx;
+  c.clearRect(0, 0, W, H);
+  c.font = '11px system-ui, sans-serif';
+  const bottom = H - 20;
+  // dB gridlines
+  c.lineWidth = 1; c.strokeStyle = theme.grid; c.fillStyle = theme.text; c.textAlign = 'left'; c.textBaseline = 'bottom';
+  for (const db of [-80, -60, -40, -20]) {
+    const y = Math.round(yOf(db)) + .5;
+    c.beginPath(); c.moveTo(0, y); c.lineTo(W, y); c.stroke();
+    c.fillText(db + ' dB', 3, y - 1);
+  }
+  // frequency gridlines
+  c.textAlign = 'center'; c.textBaseline = 'top';
+  const ticks = [20, 30, 40, 50, 60, 80, 100, 200, 300, 400, 500, 600, 800, 1000, 2000, 3000, 4000, 5000, 6000, 8000, 10000, 20000];
+  const major = new Set([20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000]);
+  for (const f of ticks) {
+    if (f < fmin || f > fmax) continue;
+    const x = Math.round(xOf(f)) + .5;
+    c.strokeStyle = theme.grid; c.globalAlpha = major.has(f) ? 1 : .45;
+    c.beginPath(); c.moveTo(x, 8); c.lineTo(x, bottom); c.stroke();
+    c.globalAlpha = 1;
+    if (major.has(f) && x > 14 && x < W - 14) c.fillText(f >= 1000 ? f / 1000 + 'k' : f, x, bottom + 4);
+  }
+  // A-note markers along the top
+  c.textBaseline = 'top'; c.fillStyle = theme.accent2; c.globalAlpha = .9;
+  for (let k = 0, f = 27.5; f <= fmax; k++, f *= 2) {
+    if (f < fmin) continue;
+    const x = xOf(f);
+    if (x < 10 || x > W - 10) continue;
+    c.fillRect(Math.round(x), 0, 1, 7);
+    c.fillText('A' + k, x, 8);
+  }
+  c.globalAlpha = 1;
+
+  if (blind) {
+    c.fillStyle = theme.text; c.textAlign = 'center'; c.textBaseline = 'middle'; c.font = '600 14px system-ui, sans-serif';
+    const t = 'Listen, then answer — the spectrum is hidden', tw = c.measureText(t).width + 16;
+    c.fillStyle = theme.plot; c.fillRect((W - tw) / 2, H / 2 - 22, tw, 28);
+    c.fillStyle = theme.text; c.fillText(t, W / 2, H / 2 - 8);
+    return;
+  }
+
+  // spectrum
+  if (bins && (micOn || tone)) {
+    c.beginPath(); c.moveTo(0, bottom);
+    for (let x = 0; x < W; x++) c.lineTo(x, yOf(cols[x]));
+    c.lineTo(W, bottom); c.closePath();
+    c.globalAlpha = .28; c.fillStyle = theme.accent; c.fill(); c.globalAlpha = 1;
+    c.beginPath();
+    for (let x = 0; x < W; x++) (x ? c.lineTo(x, yOf(cols[x])) : c.moveTo(x, yOf(cols[x])));
+    c.strokeStyle = theme.accent; c.lineWidth = 1.5; c.lineJoin = 'round'; c.stroke();
+  }
+  // tone marker
+  if (tone && activeTab === 'tone' && tone.f >= fmin && tone.f <= fmax) {
+    const x = Math.round(xOf(tone.f)) + .5;
+    c.strokeStyle = theme.accent2; c.lineWidth = 1.5; c.setLineDash([4, 4]);
+    c.beginPath(); c.moveTo(x, 8); c.lineTo(x, bottom); c.stroke(); c.setLineDash([]);
+  }
+  // peak marker
+  if (peak) {
+    const x = xOf(peak.f), y = yOf(peak.db);
+    c.fillStyle = theme.accent2;
+    c.beginPath(); c.arc(x, y, 4.5, 0, 7); c.fill();
+    c.strokeStyle = theme.accent2; c.lineWidth = 1; c.beginPath(); c.moveTo(x, y + 5); c.lineTo(x, bottom); c.stroke();
+  }
+  // cursor
+  if (cursorF && cursorF >= fmin && cursorF <= fmax) {
+    const x = Math.round(xOf(cursorF)) + .5;
+    c.strokeStyle = theme.text; c.globalAlpha = .6; c.lineWidth = 1;
+    c.beginPath(); c.moveTo(x, 8); c.lineTo(x, bottom); c.stroke(); c.globalAlpha = 1;
+    const f = fmt(cursorF), label = `${f.v} ${f.u} · ${noteOf(cursorF).name}`;
+    const tw = c.measureText(label).width + 12, lx = clamp(x - tw / 2, 2, W - tw - 2);
+    c.fillStyle = theme.plot; c.globalAlpha = .9; c.fillRect(lx, 24, tw, 18); c.globalAlpha = 1;
+    c.fillStyle = theme.text; c.textAlign = 'left'; c.textBaseline = 'middle'; c.font = '600 11px system-ui, sans-serif';
+    c.fillText(label, lx + 6, 33);
+  }
+}
+
+function pushSpectrogramRow() {
+  gctx.drawImage(sg, 0, 0, sg.width, sg.height - 1, 0, 1, sg.width, sg.height - 1);
+  const d = row.data;
+  for (let x = 0; x < W; x++) {
+    const i = ((clamp((cols[x] + 95) / 65, 0, 1) * 255) | 0) * 3;
+    d[x * 4] = LUT[i]; d[x * 4 + 1] = LUT[i + 1]; d[x * 4 + 2] = LUT[i + 2]; d[x * 4 + 3] = 255;
+  }
+  gctx.putImageData(row, 0, 0);
+}
+
+/* ---------- readout ---------- */
+let lastText = 0;
+function updateReadout(now, peak, blind) {
+  if (now - lastText < 60) return;
+  lastText = now;
+  const r = $('#readout');
+  if (peak && !blind) {
+    if (shown && Math.abs(Math.log(peak.f / shown)) < 0.012) shown += (peak.f - shown) * 0.35; else shown = peak.f;
+    lastPeakT = now; lastPeakDb = peak.db;
+  }
+  const age = now - lastPeakT;
+  if (blind || age > 4000 || !shown) {
+    $('#fv').textContent = '—'; $('#fu').textContent = 'Hz';
+    $('#fnote').innerHTML = blind ? 'Listening…' : '&nbsp;'; $('#fband').innerHTML = '&nbsp;';
+    $('#needle').style.left = '50%'; r.classList.remove('stale'); return;
+  }
+  const f = fmt(shown), n = noteOf(shown);
+  $('#fv').textContent = f.v; $('#fu').textContent = f.u;
+  $('#fnote').textContent = `${n.name}  ${n.cents > 0 ? '+' : ''}${n.cents}¢`;
+  $('#fband').textContent = bandOf(shown);
+  $('#needle').style.left = 50 + clamp(n.cents, -50, 50) + '%';
+  r.classList.toggle('stale', age > 400);
+}
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (document.hidden || !W || !row) return;
+  const live = !!analyser && (micOn || !!tone);
+  const blind = !!isBlind();
+  let peak = null;
+  if (live) {
+    analyser.getFloatFrequencyData(bins);
+    computeColumns();
+    if (!blind) peak = findPeak();
+  }
+  drawSpectrum(peak, blind);
+  if (live && !blind) { pushSpectrogramRow(); sgHas = true; }
+  else if (blind && sgHas) { gctx.fillStyle = '#0a0d18'; gctx.fillRect(0, 0, sg.width, sg.height); sgHas = false; }
+  updateReadout(now, peak, blind);
+}
+requestAnimationFrame(frame);
+
+/* pointer: read any frequency; in the Tone tab it also sets the tone */
+function pointerF(e) { const r = spec.getBoundingClientRect(); return fOf(clamp(e.clientX - r.left, 0, W)); }
+spec.addEventListener('pointerdown', (e) => {
+  cursorF = pointerF(e);
+  if (activeTab === 'tone') setToneFreq(cursorF);
+});
+spec.addEventListener('pointermove', (e) => {
+  cursorF = pointerF(e);
+  if (activeTab === 'tone' && e.buttons) setToneFreq(cursorF);
+});
+spec.addEventListener('pointerleave', () => { cursorF = null; });
+spec.addEventListener('pointerup', (e) => { if (e.pointerType !== 'mouse') cursorF = null; });
+spec.addEventListener('pointercancel', () => { cursorF = null; });
+
+/* ---------- tabs ---------- */
+const tabs = [...document.querySelectorAll('[role=tab]')];
+function showTab(name, focus) {
+  if (name !== activeTab) { clearTimeout(playTimer); toneStop(); setToneButton(); }
+  activeTab = name;
+  tabs.forEach((t) => {
+    const on = t.dataset.tab === name;
+    t.setAttribute('aria-selected', on); t.tabIndex = on ? 0 : -1;
+    $('#p-' + t.dataset.tab).hidden = !on;
+    if (on && focus) t.focus();
+  });
+  resetQuizRound();
+}
+tabs.forEach((t, i) => {
+  t.addEventListener('click', () => showTab(t.dataset.tab));
+  t.addEventListener('keydown', (e) => {
+    const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+    if (d) { e.preventDefault(); showTab(tabs[(i + d + tabs.length) % tabs.length].dataset.tab, true); }
+  });
+});
+
+/* ---------- tone tab ---------- */
+const LMIN = Math.log(20), LMAX = Math.log(16000);
+const sliderToF = (s) => Math.exp(LMIN + (s / 1000) * (LMAX - LMIN));
+const fToSlider = (f) => ((Math.log(f) - LMIN) / (LMAX - LMIN)) * 1000;
+let toneF = saved.toneF || 440;
+function setToneFreq(f) {
+  toneF = clamp(f, 20, 16000);
+  persist('toneF', toneF);
+  $('#tone-slider').value = fToSlider(toneF);
+  if (document.activeElement !== $('#tone-num')) $('#tone-num').value = +toneF.toFixed(1);
+  const t = fmt(toneF), n = noteOf(toneF);
+  $('#tone-label').textContent = `${t.v} ${t.u} · ${n.name}${n.cents ? ` ${n.cents > 0 ? '+' : ''}${n.cents}¢` : ''}`;
+  $('#lowhint').hidden = toneF >= 150;
+  if (tone && activeTab === 'tone') toneSetFreq(toneF);
+}
+function setToneButton() {
+  const on = !!tone && activeTab === 'tone';
+  $('#tone-play').textContent = on ? 'Stop' : 'Play';
+  $('#tone-play').classList.toggle('on', on);
+}
+$('#tone-play').addEventListener('click', () => {
+  if (tone) toneStop(); else toneStart(toneF, $('#wave').value);
+  setToneButton();
+});
+$('#tone-slider').addEventListener('input', (e) => setToneFreq(sliderToF(+e.target.value)));
+$('#tone-num').addEventListener('input', (e) => { const v = parseFloat(e.target.value); if (v >= 20 && v <= 16000) setToneFreq(v); });
+$('#tone-num').addEventListener('blur', () => setToneFreq(toneF));
+$('#wave').addEventListener('change', (e) => { if (tone) { tone.osc.type = e.target.value; } });
+document.querySelectorAll('[data-step]').forEach((b) => b.addEventListener('click', () => setToneFreq(toneF * Math.pow(2, +b.dataset.step / 12))));
+const LANDMARKS = [[50, 'sub'], [100, 'bass'], [250, 'warmth'], [440, 'A4'], [500, 'body'], [1000, 'mids'], [2000, 'presence'], [4000, 'bite'], [8000, 'sizzle'], [12000, 'air']];
+$('#landmarks').innerHTML = LANDMARKS.map(([f, n]) => `<button type="button" class="chip" data-f="${f}"><b>${short(f)}</b> ${n}</button>`).join('');
+$('#landmarks').addEventListener('click', (e) => {
+  const b = e.target.closest('.chip'); if (!b) return;
+  setToneFreq(+b.dataset.f);
+  if (!tone) { toneStart(toneF, $('#wave').value); setToneButton(); }
+});
+setToneFreq(toneF);
+
+/* ---------- quiz tab ---------- */
+const OCT = [125, 250, 500, 1000, 2000, 4000, 8000];
+const THIRD = [125, 160, 200, 250, 315, 400, 500, 630, 800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000];
+const levelList = () => (quiz.level === 'oct' ? OCT : THIRD);
+const qs = () => (saved.stats && saved.stats[quiz.level]) || { n: 0, r: 0, streak: 0, best: 0 };
+function saveQs(s) { persist('stats', Object.assign({}, saved.stats, { [quiz.level]: s })); }
+
+function renderChoices() {
+  const g = $('#choices');
+  g.className = 'choices ' + quiz.level;
+  g.innerHTML = levelList().map((f) => `<button type="button" class="choice" data-f="${f}" aria-label="${f} hertz">${short(f)}</button>`).join('');
+}
+function renderStats() {
+  const s = qs();
+  $('#stats').textContent = quiz.mode === 'test'
+    ? (s.n ? `Score ${s.r}/${s.n} (${Math.round(100 * s.r / s.n)}%) · streak ${s.streak} · best streak ${s.best}` : 'No answers yet at this level.')
+    : '';
+}
+function renderQuizMode() {
+  const test = quiz.mode === 'test';
+  $('#m-test').setAttribute('aria-pressed', test); $('#m-learn').setAttribute('aria-pressed', !test);
+  $('#l-oct').setAttribute('aria-pressed', quiz.level === 'oct'); $('#l-third').setAttribute('aria-pressed', quiz.level === 'third');
+  $('#q-play').hidden = !test;
+  $('#quiz-help').textContent = test
+    ? 'Press “Play a tone”, then tap the frequency (Hz) you think it is.'
+    : 'Tap a frequency to hear it. Watch it appear on the spectrum above.';
+  $('#fb').textContent = test ? '' : 'Tap any button to hear that frequency.';
+  renderStats();
+}
+function setQuizButton() {
+  $('#q-play').textContent = !quiz.target || quiz.answered ? (quiz.target ? 'Next tone' : 'Play a tone') : 'Replay tone';
+}
+function resetQuizRound() {
+  clearTimeout(playTimer);
+  quiz.target = null; quiz.answered = true;
+  document.querySelectorAll('.choice').forEach((b) => b.classList.remove('correct', 'wrong', 'flash'));
+  renderQuizMode(); setQuizButton();
+}
+function newRound() {
+  const list = levelList().filter((f) => f !== quiz.prev);
+  quiz.target = list[(Math.random() * list.length) | 0]; quiz.prev = quiz.target; quiz.answered = false;
+  document.querySelectorAll('.choice').forEach((b) => b.classList.remove('correct', 'wrong'));
+  $('#fb').textContent = 'Which frequency was that?';
+  playFor(quiz.target, 1500); setQuizButton();
+}
+$('#q-play').addEventListener('click', () => {
+  if (!quiz.target || quiz.answered) newRound(); else playFor(quiz.target, 1500);
+});
+$('#choices').addEventListener('click', (e) => {
+  const b = e.target.closest('.choice'); if (!b) return;
+  const f = +b.dataset.f;
+  if (quiz.mode === 'learn') {
+    document.querySelectorAll('.choice').forEach((x) => x.classList.remove('flash')); b.classList.add('flash');
+    playFor(f, 1500);
+    $('#fb').textContent = `${f} Hz · ${noteOf(f).name} · ${bandOf(f)}`;
+    return;
+  }
+  if (!quiz.target || quiz.answered) { $('#fb').textContent = 'Press “Play a tone” first.'; return; }
+  quiz.answered = true;
+  const s = qs(); s.n++;
+  const ok = f === quiz.target;
+  if (ok) { s.r++; s.streak++; s.best = Math.max(s.best, s.streak); } else s.streak = 0;
+  saveQs(s);
+  document.querySelectorAll('.choice').forEach((x) => { if (+x.dataset.f === quiz.target) x.classList.add('correct'); });
+  if (!ok) b.classList.add('wrong');
+  if (ok) $('#fb').textContent = `Correct: ${quiz.target} Hz (${bandOf(quiz.target)}).`;
+  else {
+    const oct = Math.log2(f / quiz.target), steps = Math.abs(oct) < 1 ? `${Math.round(Math.abs(oct) * 3)} step${Math.round(Math.abs(oct) * 3) === 1 ? '' : 's'} (⅓ oct)` : `${Math.abs(oct).toFixed(1)} octaves`;
+    $('#fb').textContent = `It was ${quiz.target} Hz (${bandOf(quiz.target)}). You said ${f} Hz: ${steps} too ${oct > 0 ? 'high' : 'low'}.`;
+  }
+  playFor(quiz.target, 1500);
+  renderStats(); setQuizButton();
+});
+function setQuizMode(m) { quiz.mode = m; resetQuizRound(); }
+function setQuizLevel(l) { quiz.level = l; persist('level', l); renderChoices(); resetQuizRound(); }
+$('#m-test').addEventListener('click', () => setQuizMode('test'));
+$('#m-learn').addEventListener('click', () => setQuizMode('learn'));
+$('#l-oct').addEventListener('click', () => setQuizLevel('oct'));
+$('#l-third').addEventListener('click', () => setQuizLevel('third'));
+renderChoices(); resetQuizRound();
+
+// Release the mic if the page is left in the background for good.
+addEventListener('pagehide', () => { if (micOn) micStop(); });
+})();
+</script>
+</body>
+</html>
