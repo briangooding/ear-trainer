@@ -17,7 +17,7 @@
   :root {
     --bg: #f3f7f6; --card: #ffffff; --text: #14201f; --muted: #5a6b69; --line: #d9e4e2;
     --accent: #0b7a75; --accent-ink: #ffffff; --accent2: #c2570c;
-    --ok: #17803d; --bad: #b42318;
+    --ok: #17803d; --bad: #b42318; --warn: #b26b00;
     --plot: #f8fbfa; --grid: #d3dedc;
     color-scheme: light;
   }
@@ -25,7 +25,7 @@
     :root:not([data-theme="light"]) {
       --bg: #0c1514; --card: #142120; --text: #e6f2f0; --muted: #9bb3b0; --line: #243836;
       --accent: #3fd0c9; --accent-ink: #062321; --accent2: #ffb061;
-      --ok: #4ade80; --bad: #ff8a80;
+      --ok: #4ade80; --bad: #ff8a80; --warn: #fbbf24;
       --plot: #0d1a19; --grid: #223533;
       color-scheme: dark;
     }
@@ -33,7 +33,7 @@
   :root[data-theme="dark"] {
     --bg: #0c1514; --card: #142120; --text: #e6f2f0; --muted: #9bb3b0; --line: #243836;
     --accent: #3fd0c9; --accent-ink: #062321; --accent2: #ffb061;
-    --ok: #4ade80; --bad: #ff8a80;
+    --ok: #4ade80; --bad: #ff8a80; --warn: #fbbf24;
     --plot: #0d1a19; --grid: #223533;
     color-scheme: dark;
   }
@@ -87,7 +87,7 @@
   .msg.err { color: var(--bad); }
 
   /* Tabs */
-  [role=tablist] { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
+  [role=tablist] { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
   [role=tab] { border: 0; background: transparent; padding: 9px 4px; border-radius: 10px; font-weight: 650; color: var(--muted); }
   [role=tab][aria-selected=true] { background: var(--accent); color: var(--accent-ink); }
   [role=tabpanel][hidden] { display: none; }
@@ -129,6 +129,18 @@
   .choice.flash { border-color: var(--accent); }
   .fb { min-height: 2.6em; margin: 0 0 6px; font-weight: 600; }
   .stats { color: var(--muted); font-size: .9rem; margin: 8px 0 0; }
+  /* Level meter */
+  .lvl-big { font-size: 3rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+  .lvl-big small { font-size: 1rem; font-weight: 600; color: var(--muted); letter-spacing: 0; margin-left: 4px; }
+  .lvbar { position: relative; height: 14px; margin: 14px 0 2px; border-radius: 7px; background: var(--grid); overflow: hidden; }
+  .lvfill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--ok); }
+  .lvfill.w { background: var(--warn); } .lvfill.r { background: var(--bad); }
+  .lvpk { position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1px; background: var(--text); left: 0; opacity: 0; }
+  .lvstats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; }
+  .lvstats div { background: var(--plot); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; display: grid; }
+  .lvstats b { font-size: 1.25rem; font-variant-numeric: tabular-nums; }
+  #lvh { height: 80px; }
+  .lvmini { color: var(--muted); font-size: .85rem; font-variant-numeric: tabular-nums; }
   footer { color: var(--muted); font-size: .8rem; text-align: center; }
   footer a { color: inherit; }
   @media (prefers-reduced-motion: reduce) { .needle { transition: none; } }
@@ -147,6 +159,7 @@
         <div class="freq"><span id="fv">—</span><small id="fu">Hz</small></div>
         <div class="note" id="fnote">&nbsp;</div>
         <div class="band" id="fband">&nbsp;</div>
+        <div class="lvmini" id="lvmini" hidden></div>
       </div>
       <div class="btns"><button class="btn" id="mic" type="button">Start microphone</button>
         <button class="btn ghost" id="freeze" type="button" aria-pressed="false">Freeze</button></div>
@@ -168,6 +181,7 @@
     <button role="tab" id="t-listen" aria-controls="p-listen" aria-selected="true" data-tab="listen">Listen</button>
     <button role="tab" id="t-tone" aria-controls="p-tone" aria-selected="false" data-tab="tone" tabindex="-1">Tone</button>
     <button role="tab" id="t-quiz" aria-controls="p-quiz" aria-selected="false" data-tab="quiz" tabindex="-1">Quiz</button>
+    <button role="tab" id="t-level" aria-controls="p-level" aria-selected="false" data-tab="level" tabindex="-1">Level</button>
   </div>
 
   <!-- LISTEN -->
@@ -243,6 +257,49 @@
     <p class="hint">Start in <b>Learn</b>: tap each button, listen, and watch where it lands on the spectrum. Then switch to <b>Test</b>. Pure tones are used; the analyzer is hidden until you answer so it can’t give the answer away. Octave landmarks: 125 is a low hum, 1k is a telephone-ish “honk”, 4k is where ears are most sensitive.</p>
   </section>
 
+  <!-- LEVEL -->
+  <section class="card" role="tabpanel" id="p-level" aria-labelledby="t-level" hidden>
+    <div class="top">
+      <div>
+        <div class="lvl-big"><span id="lv-now">—</span><small id="lv-unit">dBA</small></div>
+        <div class="note" id="lv-desc">&nbsp;</div>
+      </div>
+      <button class="btn" id="lv-mic" type="button">Start microphone</button>
+    </div>
+    <div class="lvbar" aria-hidden="true"><div class="lvfill" id="lv-fill"></div><div class="lvpk" id="lv-pk"></div></div>
+    <div class="meter-l" aria-hidden="true"><span>30</span><span>50</span><span>70</span><span>90</span><span>110 dB</span></div>
+    <div class="lvstats">
+      <div><span class="lab">Average</span><b id="lv-avg">—</b></div>
+      <div><span class="lab">Max</span><b id="lv-max">—</b></div>
+      <div><span class="lab">Min</span><b id="lv-min">—</b></div>
+    </div>
+    <canvas id="lvh" aria-label="Sound level over the last 30 seconds"></canvas>
+    <p class="cap">Last 30 seconds. Dashed lines at 70 and 85 dB.</p>
+    <p class="msg" id="lv-msg" role="status"></p>
+    <div class="row" style="justify-content:space-between;margin:10px 0 12px">
+      <div class="seg" role="group" aria-label="Weighting">
+        <button type="button" id="lw-a" aria-pressed="true">dBA (ear)</button>
+        <button type="button" id="lw-z" aria-pressed="false">dBZ (flat)</button>
+      </div>
+      <div class="seg" role="group" aria-label="Response">
+        <button type="button" id="lr-f" aria-pressed="true">Fast</button>
+        <button type="button" id="lr-s" aria-pressed="false">Slow</button>
+      </div>
+      <button class="btn ghost small" id="lv-reset" type="button">Reset</button>
+    </div>
+    <div class="field">
+      <label for="lv-ref">Calibrate: type what a real sound level meter reads right now</label>
+      <div class="row">
+        <input type="number" id="lv-ref" min="20" max="130" step="0.5" inputmode="decimal" placeholder="e.g. 60"> <span class="lab">dB</span>
+        <button class="btn ghost small" id="lv-set" type="button">Set</button>
+        <button class="btn ghost small" id="lv-cal0" type="button">Clear calibration</button>
+        <span class="lab" id="lv-calv"></span>
+      </div>
+    </div>
+    <p class="hint">Phone microphones aren’t calibrated, so readings are an estimate (often within ±5 dB after calibrating). <b>dBA</b> weights frequencies the way ears hear them and is what hearing-safety limits use; <b>dBZ</b> counts every frequency equally, so bass rumble shows up. <b>Fast</b> follows changes within ⅛ s, <b>Slow</b> averages over 1 s. Only the microphone is measured; a tone from this app counts only as much as the mic hears it from the speaker.</p>
+    <p class="hint">Use it to learn what 40, 60 and 80 dB feel like, and to keep practice and listening levels comfortable. Around 85 dBA, damage builds up over a working day; each +3 dB halves the safe time.</p>
+  </section>
+
   <footer>Everything runs on your phone; no audio leaves the device.</footer>
 </main>
 
@@ -283,6 +340,7 @@ const persist = (k, v) => { saved[k] = v; store.set(saved); };
 /* ---------- audio graph ---------- */
 const liveBins = () => bins;
 let ctx, analyser, master, toneToAn, bins, binHz, micStream, micSrc, tone = null, micOn = false;
+let lvZ = null, lvA = null, aIn = null, lvBuf = null; // sound level meter taps (microphone only)
 let volume = saved.vol ?? 35;
 const volGain = (v) => Math.pow(v / 100, 2) * 0.5; // gentle curve, capped at half scale
 
@@ -299,8 +357,29 @@ function ensureAudio() {
     analyser.connect(sink); sink.connect(ctx.destination);
     master = ctx.createGain(); master.gain.value = volGain(volume); master.connect(ctx.destination);
     toneToAn = ctx.createGain(); toneToAn.gain.value = 0.1; toneToAn.connect(analyser);
+    lvZ = ctx.createAnalyser(); lvZ.fftSize = 2048; lvZ.connect(sink);
+    lvBuf = new Float32Array(lvZ.fftSize);
+    try { aIn = buildAWeighting(); lvA = ctx.createAnalyser(); lvA.fftSize = 2048; aIn.out.connect(lvA); lvA.connect(sink); }
+    catch { aIn = lvA = null; } // very old browsers: flat (dBZ) only
   }
   if (ctx.state !== 'running') ctx.resume().catch(() => {});
+}
+
+/* A-weighting (IEC 61672) as a chain of first-order filters: poles at 20.6 Hz (x2), 107.7, 737.9 Hz
+   (high-pass) and 12194 Hz (x2, low-pass), bilinear-transformed, then normalized to 0 dB at 1 kHz. */
+function buildAWeighting() {
+  const fs = ctx.sampleRate;
+  const fo = (fc, hp) => {
+    const K = Math.tan(Math.PI * Math.min(fc, fs * 0.45) / fs), n = 1 / (1 + K);
+    return ctx.createIIRFilter(hp ? [n, -n] : [K * n, K * n], [1, (K - 1) * n]);
+  };
+  const chain = [fo(20.6, 1), fo(20.6, 1), fo(107.7, 1), fo(737.9, 1), fo(12194, 0), fo(12194, 0)];
+  const at = new Float32Array([1000]), mag = new Float32Array(1), ph = new Float32Array(1);
+  let g = 1;
+  for (const f of chain) { f.getFrequencyResponse(at, mag, ph); g *= mag[0]; }
+  const norm = ctx.createGain(); norm.gain.value = 1 / g;
+  chain.reduce((a, b) => (a.connect(b), b)).connect(norm);
+  return { in: chain[0], out: norm };
 }
 
 function toneStart(f, type = 'sine') {
@@ -351,18 +430,24 @@ async function micStart() {
   }
   micSrc = ctx.createMediaStreamSource(micStream);
   micSrc.connect(analyser);
-  micOn = true;
-  $('#mic').textContent = 'Stop microphone'; $('#mic').classList.add('on');
+  micSrc.connect(lvZ); if (aIn) micSrc.connect(aIn.in);
+  micOn = true; lvReset(); renderLvControls();
+  syncMicButtons();
   msg('Listening… make a sound.');
 }
 function micStop() {
   if (micStream) micStream.getTracks().forEach((t) => t.stop());
   if (micSrc) micSrc.disconnect();
   micStream = micSrc = null; micOn = false;
-  $('#mic').textContent = 'Start microphone'; $('#mic').classList.remove('on');
+  syncMicButtons();
   msg('Microphone off.');
 }
+function syncMicButtons() {
+  for (const b of [$('#mic'), $('#lv-mic')]) { b.textContent = micOn ? 'Stop microphone' : 'Start microphone'; b.classList.toggle('on', micOn); }
+  $('#lvmini').hidden = !micOn;
+}
 $('#mic').addEventListener('click', () => (micOn ? micStop() : micStart()));
+$('#lv-mic').addEventListener('click', () => (micOn ? micStop() : micStart()));
 
 /* ---------- settings ---------- */
 const DBMIN = -100, DBMAX = -10;
@@ -602,6 +687,7 @@ function frame(now) {
     if (!blind) peak = findPeak(bins);
   }
   drawSpectrum(peak, blind);
+  if (micOn && lvZ) lvUpdate(now);
   if (live && !blind && !frozen) { pushSpectrogramRow(); sgHas = true; }
   else if (blind && sgHas) { gctx.fillStyle = '#0a0d18'; gctx.fillRect(0, 0, sg.width, sg.height); sgHas = false; }
   updateReadout(now, peak, blind);
@@ -660,6 +746,102 @@ $('#fz-play').addEventListener('click', () => {
   setFzButton();
 });
 $('#fz-snap').addEventListener('click', () => { if (frozenPeak) { dotF = clamp(frozenPeak.f, 20, 16000); if (tone) toneSetFreq(dotF); } });
+
+/* ---------- sound level meter ---------- */
+// Phone mics aren't calibrated: dB SPL ≈ dBFS + LV_BASE, adjusted by the user's calibration offset.
+const LV_BASE = 110, LV_LO = 30, LV_HI = 110;
+const LV_DESC = [[0, 'Near silent'], [30, 'Whisper, quiet bedroom'], [40, 'Quiet room, library'], [50, 'Quiet office, rain'],
+  [60, 'Normal conversation'], [70, 'Busy street, vacuum cleaner'], [80, 'Heavy traffic, loud restaurant'],
+  [85, 'Loud: risk after ~8 h a day'], [94, 'Very loud: risk after ~1 h'], [100, 'Club or concert: risk in ~15 min'],
+  [110, 'Extremely loud: risk in ~1 min'], [120, 'Pain threshold']];
+const lv = { w: saved.lvW === 'z' ? 'z' : 'a', slow: !!saved.lvSlow, cal: +saved.lvCal || 0,
+  a: null, z: null, lastT: 0, lastText: 0, lastHist: 0, clipT: -1e9, hist: [] };
+const newAcc = () => ({ ema: 0, primed: false, e: 0, t: 0, max: -Infinity, min: Infinity, age: 0 });
+function lvReset() { lv.a = newAcc(); lv.z = newAcc(); lv.hist = []; lv.lastT = 0; }
+lvReset();
+const toDb = (ms) => 10 * Math.log10(ms + 1e-20) + LV_BASE + lv.cal;
+function meanSquare(an) {
+  an.getFloatTimeDomainData(lvBuf);
+  let s = 0, pk = 0;
+  for (let i = 0; i < lvBuf.length; i++) { const v = lvBuf[i]; s += v * v; const a = v < 0 ? -v : v; if (a > pk) pk = a; }
+  return { ms: s / lvBuf.length, pk };
+}
+function accumulate(acc, ms, dt) {
+  const tau = lv.slow ? 1 : 0.125;
+  if (!acc.primed) { acc.ema = ms; acc.primed = true; } else acc.ema += (1 - Math.exp(-dt / tau)) * (ms - acc.ema);
+  acc.e += ms * dt; acc.t += dt; acc.age += dt;
+  if (acc.age > 0.5) { const d = acc.ema; if (d > acc.max) acc.max = d; if (d < acc.min) acc.min = d; } // skip start-up transient
+}
+const lvFmt = (db) => (!isFinite(db) ? '—' : db < 20 ? '<20' : db.toFixed(1));
+const pct = (db) => clamp((db - LV_LO) / (LV_HI - LV_LO), 0, 1) * 100;
+function safeTime(leq) { // NIOSH: 85 dBA for 8 h, halve the time for every +3 dB
+  const h = 8 / Math.pow(2, (leq - 85) / 3);
+  return h >= 1 ? `${+h.toFixed(h < 10 ? 1 : 0)} h` : h * 60 >= 1 ? `${Math.round(h * 60)} min` : `${Math.max(1, Math.round(h * 3600))} s`;
+}
+function lvUpdate(now) {
+  const dt = lv.lastT ? clamp((now - lv.lastT) / 1000, 0, 0.25) : 0; lv.lastT = now;
+  const z = meanSquare(lvZ);
+  if (z.pk > 0.98) lv.clipT = now;
+  if (dt) {
+    accumulate(lv.z, z.ms, dt);
+    if (lvA) accumulate(lv.a, meanSquare(lvA).ms, dt);
+  }
+  const acc = lv.w === 'a' && lvA ? lv.a : lv.z, unit = lv.w === 'a' && lvA ? 'dBA' : 'dBZ';
+  if (!acc.primed) return;
+  const cur = toDb(acc.ema);
+  if (now - lv.lastHist >= 100) { lv.lastHist = now; lv.hist.push(cur); if (lv.hist.length > 300) lv.hist.shift(); if (activeTab === 'level') drawHist(); }
+  const f = $('#lv-fill'); f.style.width = pct(cur) + '%';
+  f.classList.toggle('w', cur >= 70 && cur < 85); f.classList.toggle('r', cur >= 85);
+  if (isFinite(acc.max)) { const p = $('#lv-pk'); p.style.left = pct(toDb(acc.max)) + '%'; p.style.opacity = .7; }
+  if (now - lv.lastText < 150) return;
+  lv.lastText = now;
+  const leq = acc.t ? toDb(acc.e / acc.t) : -Infinity;
+  $('#lv-now').textContent = cur < 20 ? '<20' : cur.toFixed(0); $('#lv-unit').textContent = unit;
+  $('#lv-desc').textContent = (LV_DESC.filter((d) => cur >= d[0]).pop() || LV_DESC[0])[1];
+  $('#lv-avg').textContent = lvFmt(leq); $('#lv-max').textContent = lvFmt(toDb(acc.max)); $('#lv-min').textContent = lvFmt(toDb(acc.min));
+  $('#lvmini').textContent = `Level ${cur < 20 ? '<20' : cur.toFixed(0)} ${unit}`;
+  const clip = now - lv.clipT < 1500;
+  const lm = $('#lv-msg');
+  lm.classList.toggle('err', clip);
+  lm.textContent = clip ? 'Microphone overloaded: the real level is higher than shown.'
+    : unit === 'dBA' && leq >= 80 && acc.t > 5 ? `Average ${leq.toFixed(0)} dBA: safe for about ${safeTime(leq)} a day (NIOSH).` : '';
+}
+const lvh = $('#lvh'), hctx = lvh.getContext('2d');
+function drawHist() {
+  const w = Math.round(lvh.clientWidth), h = Math.round(lvh.clientHeight);
+  if (!w) return;
+  if (lvh.width !== w * DPR || lvh.height !== h * DPR) { lvh.width = w * DPR; lvh.height = h * DPR; }
+  const c = hctx; c.setTransform(DPR, 0, 0, DPR, 0, 0); c.clearRect(0, 0, w, h);
+  const y = (db) => 4 + (h - 8) * (1 - pct(db) / 100);
+  c.strokeStyle = theme.grid; c.lineWidth = 1; c.setLineDash([4, 4]);
+  for (const d of [70, 85]) { const yy = Math.round(y(d)) + .5; c.beginPath(); c.moveTo(0, yy); c.lineTo(w, yy); c.stroke(); }
+  c.setLineDash([]); c.fillStyle = theme.text; c.font = '10px system-ui, sans-serif'; c.textBaseline = 'bottom';
+  c.fillText('85', 3, y(85) - 1); c.fillText('70', 3, y(70) - 1);
+  const n = lv.hist.length; if (n < 2) return;
+  c.beginPath();
+  for (let i = 0; i < n; i++) { const x = w - (n - 1 - i) * (w / 299); i ? c.lineTo(x, y(lv.hist[i])) : c.moveTo(x, y(lv.hist[i])); }
+  c.strokeStyle = theme.accent; c.lineWidth = 1.5; c.lineJoin = 'round'; c.stroke();
+}
+function renderLvControls() {
+  if (!lvA && lv.w === 'a' && ctx) lv.w = 'z';
+  $('#lw-a').setAttribute('aria-pressed', lv.w === 'a'); $('#lw-z').setAttribute('aria-pressed', lv.w === 'z');
+  $('#lr-f').setAttribute('aria-pressed', !lv.slow); $('#lr-s').setAttribute('aria-pressed', lv.slow);
+  $('#lv-calv').textContent = lv.cal ? `Offset ${lv.cal > 0 ? '+' : ''}${lv.cal.toFixed(1)} dB` : 'Not calibrated';
+}
+$('#lw-a').addEventListener('click', () => { lv.w = 'a'; persist('lvW', 'a'); renderLvControls(); });
+$('#lw-z').addEventListener('click', () => { lv.w = 'z'; persist('lvW', 'z'); renderLvControls(); });
+$('#lr-f').addEventListener('click', () => { lv.slow = false; persist('lvSlow', false); renderLvControls(); });
+$('#lr-s').addEventListener('click', () => { lv.slow = true; persist('lvSlow', true); renderLvControls(); });
+$('#lv-reset').addEventListener('click', () => { lvReset(); ['#lv-avg', '#lv-max', '#lv-min'].forEach((s) => { $(s).textContent = '—'; }); $('#lv-pk').style.opacity = 0; drawHist(); });
+$('#lv-set').addEventListener('click', () => {
+  const ref = parseFloat($('#lv-ref').value), acc = lv.w === 'a' && lvA ? lv.a : lv.z;
+  if (!micOn || !acc.primed) { $('#lv-msg').textContent = 'Start the microphone first, then type the reference reading.'; return; }
+  if (!(ref >= 20 && ref <= 130)) { $('#lv-msg').textContent = 'Type the reference meter’s reading (20–130 dB).'; return; }
+  lv.cal = clamp(lv.cal + ref - toDb(acc.ema), -40, 40); persist('lvCal', lv.cal); renderLvControls();
+  $('#lv-msg').textContent = 'Calibrated. Hold the phone where the reference meter was.';
+});
+$('#lv-cal0').addEventListener('click', () => { lv.cal = 0; persist('lvCal', 0); renderLvControls(); });
+renderLvControls();
 
 /* ---------- tabs ---------- */
 const tabs = [...document.querySelectorAll('[role=tab]')];
